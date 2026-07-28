@@ -16,11 +16,14 @@ function makeFanLight(state = {}, context = {}) {
     instance.dpRotationSpeed = '62';
     instance.dpFanDirection = device.context.dpFanDirection || '63';
     instance.dpLightOn = device.context.dpLightOn || '20';
+    instance.dpBrightness = '22';
     instance.dpColorTemp = '23';
     instance.maxSpeed = parseInt(device.context.maxSpeed) || 6;
     instance.fanDefaultSpeed = parseInt(device.context.fanDefaultSpeed) || 1;
     instance.fanCurrentSpeed = 0;
     instance.useStrings = instance._coerceBoolean(device.context.useStrings, true);
+    instance.useStringsFan = instance._coerceBoolean(device.context.useStringsFan, instance.useStrings);
+    instance.useStringsLight = instance._coerceBoolean(device.context.useStringsLight, instance.useStrings);
     instance.singleDpWrites = instance._coerceBoolean(device.context.singleDpWrites, false);
     instance.lightUseEnum = instance._coerceBoolean(device.context.lightUseEnum, false);
     instance.lightOnCommand = device.context.lightOnCommand || 'On';
@@ -415,4 +418,72 @@ describe('SimpleFanLightAccessory.getColorTemp / setColorTemp', () => {
         await expect(instance.setColorTemp(370)).rejects.toBeInstanceOf(HAP.HapStatusError);
         expect(device.update).not.toHaveBeenCalled();
     });
+
 });
+
+// ---------------------------------------------------------------------------
+// useStringsFan / useStringsLight override useStrings per side, and inherit it
+// when unset so configs written before the split keep their old behaviour.
+// ---------------------------------------------------------------------------
+describe('SimpleFanLightAccessory — useStringsFan / useStringsLight', () => {
+    test('both sides inherit useStrings: false when neither override is set', () => {
+        const fan = makeFanLight({ '60': false, '62': 1 }, { useStrings: false });
+        fan.instance.setSpeed(100);
+        expect(fan.device.update).toHaveBeenCalledWith({ '60': true, '62': 6 });
+
+        const light = makeFanLight({ '22': 500, '23': 500 }, { useStrings: false });
+        light.instance.setBrightness(100);
+        light.instance.setColorTemp(154);
+        expect(payloads(light.device)).toEqual([{ '22': 1000 }, { '23': 1000 }]);
+    });
+
+    test('both sides inherit the useStrings default (strings) when nothing is set', () => {
+        const fan = makeFanLight({ '60': false, '62': 1 });
+        fan.instance.setSpeed(100);
+        expect(fan.device.update).toHaveBeenCalledWith({ '60': true, '62': '6' });
+
+        const light = makeFanLight({ '22': 500, '23': 500 });
+        light.instance.setBrightness(100);
+        light.instance.setColorTemp(154);
+        expect(payloads(light.device)).toEqual([{ '22': '1000' }, { '23': '1000' }]);
+    });
+
+    test('useStringsFan overrides the fan only, leaving the light on useStrings', () => {
+        const { instance, device } = makeFanLight(
+            { '60': false, '62': 1, '22': 500, '23': 500 },
+            { useStrings: true, useStringsFan: false }
+        );
+        instance.setSpeed(100);
+        instance.setBrightness(100);
+        instance.setColorTemp(154);
+        expect(payloads(device)).toEqual([{ '60': true, '62': 6 }, { '22': '1000' }, { '23': '1000' }]);
+    });
+
+    test('useStringsLight overrides the light only, leaving the fan on useStrings', () => {
+        const { instance, device } = makeFanLight(
+            { '60': false, '62': 1, '22': 500, '23': 500 },
+            { useStrings: false, useStringsLight: true }
+        );
+        instance.setSpeed(100);
+        instance.setBrightness(100);
+        instance.setColorTemp(154);
+        expect(payloads(device)).toEqual([{ '60': true, '62': 6 }, { '22': '1000' }, { '23': '1000' }]);
+    });
+
+    test('accepts the string form of the overrides, as hand-written configs produce', () => {
+        const { instance, device } = makeFanLight(
+            { '60': false, '62': 1, '23': 500 },
+            { useStrings: 'true', useStringsFan: 'false', useStringsLight: 'true' }
+        );
+        instance.setSpeed(100);
+        instance.setColorTemp(154);
+        expect(payloads(device)).toEqual([{ '60': true, '62': 6 }, { '23': '1000' }]);
+    });
+
+    test('setFanOn from off applies useStringsFan to the default speed', () => {
+        const { instance, device } = makeFanLight({ '60': false, '62': 1 }, { useStrings: true, useStringsFan: false });
+        instance.setFanOn(true);
+        expect(device.update).toHaveBeenCalledWith({ '60': true, '62': 1 });
+    });
+});
+
